@@ -11,7 +11,9 @@ Windows 桌面面试练习工具。程序显示名为 Wallpaper Engine，与同�
 
 ### 安装和启动
 
-使用 Windows 64 位电脑，并安装 .NET Framework 4.8。将完整运行包 `InterviewPracticeDesktop-Windows.zip` 解压到一个文件夹，双击 `Wallpaper Engine.exe` 或 `启动.cmd`。
+使用 Windows 64 位电脑和 .NET Framework 4.8。取得维护者提供的完整自解压包 `WallpaperEngine-5.4.0-Setup.exe` 后，双击即可解压并启动，无需安装 Android Studio 或开发工具。首次解压需要等待，后续双击相同文件会直接启动。首次使用仍需填写自己的 API Key。
+
+程序解压到 `%LOCALAPPDATA%\InterviewPracticeDesktop`，个人设置保存在该目录的 `MockInterviewAI-data`。运行包包含模型和运行库，体积约 1.25 GB。GitHub 的 Code → Download ZIP 仍然只是源码；可运行文件应通过 Releases 附件或维护者分享链接获取。
 
 必须保留程序旁的 `models`、`runtime` 文件夹和 DLL，不能只把 EXE 复制到桌面。桌面入口应使用快捷方式；在应用根目录执行以下命令可创建它：
 
@@ -88,6 +90,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\source\build.ps1
 ```
 
 构建输出仍为根目录的 `Wallpaper Engine.exe`。图标、XAML 和两份模板快照由脚本按现有路径嵌入；不要仅因模板文件是 Markdown 就删除或重命名。资源说明见[许可与规则来源](licenses/SOURCES.md)。
+
+### 制作可直接运行的 EXE
+
+在模型、运行库和主程序已准备好的仓库根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\source\Build-PortableLauncher.ps1
+```
+
+默认输出到项目上一级目录的 `WallpaperEngine-5.4.0-Setup.exe`。构建采用文件白名单，只打包程序、依赖、模型、说明和许可证，不包含个人设置、密钥、简历、测试记录或 Git 历史。将该 EXE 上传到 GitHub Releases 的附件区或网盘，分享下载链接即可；不要放进 Git 源码目录。此启动包未做代码签名，Windows 可能提示未知发布者。
 
 ### 语音模型选择
 
