@@ -23,7 +23,7 @@ namespace MockInterviewAI
         public CaptureState Protection { get; private set; }
         private readonly SettingsStore store;
         private readonly TextBox question, answer, job, resume, transcriptBox, vocabulary, apiEndpoint, apiModel, systemPrompt;
-        private readonly TextBox visionModel, visionPrompt;
+        private readonly TextBox visionModel, visionPrompt, normalTokens, visionTokens;
         private readonly PasswordBox key;
         private readonly TextBlock status, protectionTitle, protectionDetail, answerContext, speechStatus;
         private readonly TextBlock transcriptPreview;
@@ -67,6 +67,8 @@ namespace MockInterviewAI
             apiEndpoint = Control<TextBox>("ApiEndpointBox"); apiModel = Control<TextBox>("ApiModelBox");
             visionModel = Control<TextBox>("VisionModelBox");
             visionPrompt = Control<TextBox>("VisionPromptBox");
+            normalTokens = Control<TextBox>("NormalTokensBox");
+            visionTokens = Control<TextBox>("VisionTokensBox");
             apiJsonMode = Control<CheckBox>("ApiJsonModeBox"); apiCompletionTokens = Control<CheckBox>("ApiCompletionTokensBox");
             key = Control<PasswordBox>("ApiKeyBox"); status = Control<TextBlock>("StatusText");
             protectionTitle = Control<TextBlock>("ProtectionTitle"); protectionDetail = Control<TextBlock>("ProtectionDetail");
@@ -97,6 +99,8 @@ namespace MockInterviewAI
             systemPrompt.Text = String.IsNullOrWhiteSpace(saved.SystemPrompt) ? InterviewCore.DefaultManualSystemPrompt : saved.SystemPrompt;
             visionModel.Text = saved.VisionModel ?? "";
             visionPrompt.Text = saved.VisionPrompt ?? "";
+            normalTokens.Text = saved.NormalMaxTokens > 0 ? saved.NormalMaxTokens.ToString() : "2000";
+            visionTokens.Text = saved.VisionMaxTokens > 0 ? saved.VisionMaxTokens.ToString() : "1600";
             remember.IsChecked = saved.RememberKey;
             automatic.IsChecked = saved.AutoAnswerEnabled ?? true;
             opacity.Value = saved.OpacityPercent >= 40 && saved.OpacityPercent <= 100 ? saved.OpacityPercent : 86;
@@ -312,7 +316,10 @@ namespace MockInterviewAI
 
         private ApiConfiguration ReadApiConfiguration()
         {
-            return new ApiConfiguration(apiEndpoint.Text, apiModel.Text, apiJsonMode.IsChecked == true, apiCompletionTokens.IsChecked == true);
+            int normal, vision;
+            int.TryParse(normalTokens.Text.Trim(), out normal);
+            int.TryParse(visionTokens.Text.Trim(), out vision);
+            return new ApiConfiguration(apiEndpoint.Text, apiModel.Text, apiJsonMode.IsChecked == true, apiCompletionTokens.IsChecked == true, normal, vision);
         }
 
         private void SaveSettings()
@@ -322,6 +329,7 @@ namespace MockInterviewAI
                 ApiConfiguration api = ReadApiConfiguration();
                 store.Save(new SavedSettings {
                     ApiEndpoint = api.EndpointUrl, ApiModel = api.ModelName, VisionModel = visionModel.Text.Trim(), VisionPrompt = visionPrompt.Text.Trim(), ApiJsonMode = api.JsonMode, ApiCompletionTokenLimit = api.CompletionTokenLimit,
+                    NormalMaxTokens = api.NormalMaxTokens, VisionMaxTokens = api.VisionMaxTokens,
                     RememberKey = remember.IsChecked == true,
                     JobDescription = job.Text, Resume = resume.Text, Vocabulary = vocabulary.Text,
                     SystemPrompt = PromptText,
@@ -580,10 +588,15 @@ namespace MockInterviewAI
             if (busy) return;
             if (String.IsNullOrWhiteSpace(key.Password)) { ToggleSettings(); SetStatus("请先填写 API Key。", true); return; }
             byte[] png;
-            Window.Hide();
+            // Stealth capture: instead of Window.Hide() (which flashes the taskbar, drops focus,
+            // and is visible in screen recordings), just set Opacity=0. A WPF layer window with
+            // Opacity=0 is invisible to GDI CopyFromScreen, stays in the taskbar, and does not
+            // fire focus/activation events — so screen-recording proctoring won't see it blink.
+            double savedOpacity = Window.Opacity;
+            Window.Opacity = 0;
             try
             {
-                await Task.Delay(350);
+                await Task.Delay(250);
                 var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
                 using (var bmp = new System.Drawing.Bitmap(vs.Width, vs.Height))
                 using (var g = System.Drawing.Graphics.FromImage(bmp))
@@ -598,7 +611,7 @@ namespace MockInterviewAI
             }
             finally
             {
-                try { Window.Show(); Window.Activate(); } catch { }
+                try { Window.Opacity = savedOpacity; } catch { }
             }
             var current = new CancellationTokenSource();
             request = current;

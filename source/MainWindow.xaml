@@ -136,7 +136,13 @@
             <TextBlock Text="“截屏识图”使用的多模态模型，如 qwen-vl-max、gpt-4o、qwen2.5-vl-72b-instruct；留空则使用上方的模型 ID（需该模型支持图片输入）。" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,10"/>
             <WrapPanel>
               <CheckBox x:Name="ApiJsonModeBox" Content="自动回答使用 JSON 模式" ToolTip="服务商不支持 response_format 时取消；程序仍会校验返回格式。"/>
-              <CheckBox x:Name="ApiCompletionTokensBox" Content="使用 max_completion_tokens" ToolTip="默认使用 max_tokens；模型要求 max_completion_tokens 时勾选。"/>
+              <CheckBox x:Name="ApiCompletionTokensBox" Content="使用 max_completion_tokens" ToolTip="默认使用 max_tokens；DeepSeek 不要勾选；OpenAI o-series 等新模型需要时勾选。"/>
+            </WrapPanel>
+            <WrapPanel Margin="0,8,0,0">
+              <TextBlock Text="普通模式 max_tokens" VerticalAlignment="Center" Margin="0,0,6,0"/>
+              <TextBox x:Name="NormalTokensBox" Width="80" MaxLength="6" ToolTip="普通/自动回答的输出 token 上限，默认 2000，约够两分钟口述"/>
+              <TextBlock Text="识图模式 max_tokens" VerticalAlignment="Center" Margin="16,0,6,0"/>
+              <TextBox x:Name="VisionTokensBox" Width="80" MaxLength="6" ToolTip="截屏识图的输出 token 上限，默认 1600"/>
             </WrapPanel>
             <TextBlock Text="API Key" Margin="0,0,0,7"/>
             <PasswordBox x:Name="ApiKeyBox" MaxLength="512"/>

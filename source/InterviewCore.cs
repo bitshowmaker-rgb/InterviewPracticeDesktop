@@ -59,7 +59,7 @@ namespace MockInterviewAI
                     new { role = "user", content = input }
                 },
                 stream = false,
-                max_tokens = 1600
+                max_tokens = api.NormalMaxTokens
             }, api);
         }
 
@@ -138,7 +138,7 @@ namespace MockInterviewAI
                     new { role = "user", content = Json().Serialize(new { transcript = transcript, job_description = jd ?? "", resume = resume ?? "" }) }
                 },
                 response_format = new { type = "json_object" },
-                max_tokens = 1900,
+                max_tokens = api.NormalMaxTokens,
                 stream = false
             }, api);
         }
@@ -225,7 +225,7 @@ namespace MockInterviewAI
                         } }
                     },
                     stream = false,
-                    max_tokens = 1600
+                    max_tokens = api.VisionMaxTokens
                 };
                 message.Content = new StringContent(Json().Serialize(body), Encoding.UTF8, "application/json");
                 using (var response = await client.SendAsync(message, cancellation).ConfigureAwait(false))
@@ -270,10 +270,12 @@ namespace MockInterviewAI
         public string ModelName { get; private set; }
         public bool JsonMode { get; private set; }
         public bool CompletionTokenLimit { get; private set; }
+        public int NormalMaxTokens { get; private set; }
+        public int VisionMaxTokens { get; private set; }
         public bool IsDeepSeek { get { return new Uri(EndpointUrl).Host.Equals("api.deepseek.com", StringComparison.OrdinalIgnoreCase); } }
-        public static ApiConfiguration Default { get { return new ApiConfiguration(InterviewCore.Endpoint, InterviewCore.Model, true, false); } }
+        public static ApiConfiguration Default { get { return new ApiConfiguration(InterviewCore.Endpoint, InterviewCore.Model, true, false, 2000, 1600); } }
 
-        public ApiConfiguration(string endpoint, string model, bool jsonMode, bool completionTokenLimit)
+        public ApiConfiguration(string endpoint, string model, bool jsonMode, bool completionTokenLimit, int normalMaxTokens, int visionMaxTokens)
         {
             Uri address;
             if (!Uri.TryCreate((endpoint ?? "").Trim(), UriKind.Absolute, out address) ||
@@ -288,12 +290,20 @@ namespace MockInterviewAI
                 throw new InvalidOperationException("请填写服务商提供的模型 ID（最多 256 字符）。");
             JsonMode = jsonMode;
             CompletionTokenLimit = completionTokenLimit;
+            NormalMaxTokens = ClampTokens(normalMaxTokens, 2000);
+            VisionMaxTokens = ClampTokens(visionMaxTokens, 1600);
+        }
+
+        private static int ClampTokens(int value, int fallback)
+        {
+            if (value < 256 || value > 64000) return fallback;
+            return value;
         }
 
         public static ApiConfiguration FromSettings(SavedSettings settings)
         {
             return new ApiConfiguration(settings.ApiEndpoint ?? InterviewCore.Endpoint, settings.ApiModel ?? InterviewCore.Model,
-                settings.ApiJsonMode ?? true, settings.ApiCompletionTokenLimit);
+                settings.ApiJsonMode ?? true, settings.ApiCompletionTokenLimit, settings.NormalMaxTokens, settings.VisionMaxTokens);
         }
     }
 
@@ -312,6 +322,8 @@ namespace MockInterviewAI
         public string VisionModel { get; set; }
         public bool? ApiJsonMode { get; set; }
         public bool ApiCompletionTokenLimit { get; set; }
+        public int NormalMaxTokens { get; set; }
+        public int VisionMaxTokens { get; set; }
         public string EncryptedKey { get; set; }
         public bool RememberKey { get; set; }
         public string JobDescription { get; set; }
