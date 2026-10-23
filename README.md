@@ -7,21 +7,20 @@ Windows 桌面面试练习工具。程序显示名为 Wallpaper Engine，与同�
 - 自动识别问题，通过 DeepSeek 流式生成口语参考答案，上限 700 字。
 - 支持透明度调节、窗口置顶和拖动。
 
-## 直接运行与分享
+## 开始使用
 
-普通使用者需要完整的 Windows 运行包，解压后运行 `Wallpaper Engine.exe` 或 `启动.cmd`，再在设置里填写自己的 DeepSeek API Key。不要只复制 EXE。完整操作见 [分享给别人.md](分享给别人.md)。
+需要 Windows 64 位和 .NET Framework 4.8。取得完整运行包后，完整解压，运行 `Wallpaper Engine.exe` 或 `启动.cmd`，在设置中填写自己的 DeepSeek API Key，再点击“开始”。不要只复制 EXE。
 
-GitHub 的 Code → Download ZIP 只包含源码，不包含运行所需模型、运行库和 EXE。完整运行包应单独通过网盘或 GitHub Release 分享。
+GitHub 的 Code → Download ZIP 仅提供源码，不包含模型、运行库和 EXE，不能直接运行。完整运行包需要单独取得，具体见[使用与分享指南](docs/usage.md)。
 
-## 源码构建
+## 文档导航
 
-需要 Windows 64 位、.NET Framework 4.8，以及 `依赖来源.json` 列出的 NAudio DLL、Whisper 运行库与模型。准备 `lib`、`runtime`、`models` 目录后运行：
+- [使用与分享](docs/usage.md)：启动、识别、设置和如何传给别人。
+- [开发与更新](docs/development.md)：依赖准备、测试、构建、Git 工作流和语音模型选择。
+- [性能验证](docs/benchmarks.md)：历史样本对比、测试方法与结果局限。
+- [回答规则来源](answer-templates/来源说明.md)：模板快照和口语化规则的参考依据。
+- [第三方依赖许可](licenses/SOURCES.md)：依赖及其许可证来源。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\source\build.ps1
-```
+## 隐私
 
-API Key 和本地设置保存在 `MockInterviewAI-data`，该目录不纳入 Git，也不包含在干净分享包中。每位使用者自行配置密钥，自动回答会向 DeepSeek 发送转写文字与其填写的背景资料。
-
-第三方依赖的许可证见 `licenses`，回答规则的参考来源见 [回答与模型升级说明.md](回答与模型升级说明.md)。
+语音在本地转写。自动回答会将确认后的转写文字及填写的岗位 JD、简历摘要发送给 DeepSeek。API Key 和个人设置保存在本机 `MockInterviewAI-data`，不纳入 Git，也不包含在干净分享包中。每位使用者自行配置密钥。
