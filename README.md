@@ -52,10 +52,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\source\Create-DesktopShort
 
 直接使用者：通过网盘等方式发送整个干净运行包，让对方完整解压，再填写对方自己的 API Key。分享包应包含程序、模型、运行库和第三方许可证，排除发送者的密钥、简历、JD、本地设置、Git 仓库及测试记录。后续转发时继续使用干净分享包，不要将自己使用后的整个目录重新压缩发送。
 
-开发者：发送[源码仓库链接](https://github.com/bitshowmaker-rgb/InterviewPracticeDesktop)。仓库不包含模型、运行库、DLL 和 EXE，Code → Download ZIP 得到的源码不能直接运行，需按下方的开发与更新说明准备依赖并构建。完整运行包可以通过网盘提供，或另行发布为 GitHub Release 附件。
+开发者：发送[源码仓库链接](https://github.com/bitshowmaker-rgb/InterviewPracticeDesktop)。仓库不包含模型、运行库、DLL 和 EXE，Code → Download ZIP 得到的源码不能直接运行，需按下方的源码构建说明准备依赖并构建。完整运行包可以通过网盘提供，或另行发布为 GitHub Release 附件。
 
 
-## 开发与更新
+## 源码构建
 
 以下命令均在仓库根目录执行。沿用现有项目位置和 `source/`、`tests/` 目录，不需要迁移应用或本机设置。
 
@@ -88,41 +88,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\source\build.ps1
 ```
 
 构建输出仍为根目录的 `Wallpaper Engine.exe`。图标、XAML 和两份模板快照由脚本按现有路径嵌入；不要仅因模板文件是 Markdown 就删除或重命名。资源说明见[许可与规则来源](licenses/SOURCES.md)。
-
-### Git 工作流
-
-修改前确认分支和已有改动，避免覆盖其他工作：
-
-```powershell
-git rev-parse --show-toplevel
-git branch --show-current
-git status --short
-git log --oneline -5
-```
-
-在工作区干净时，用 `git pull --ff-only` 拉取更新，再修改和验证。只有文档变化时检查链接、资源路径和 Git 差异即可；代码行为变化时执行相关测试，构建前退出应用。
-
-```powershell
-git diff --check
-git diff --stat
-git diff
-```
-
-使用具体路径暂存本次修改，不一并暂存无关改动。例如本次只改 README 和文档目录时：
-
-```powershell
-git add -- README.md docs
-git diff --cached --stat
-git diff --cached
-git commit -m "docs: clarify usage and development instructions"
-git status --short
-```
-
-迁移、删除或新增其他文件时，分别检查并暂存对应的具体路径。Git 身份缺失时先由维护者配置自己的身份，再提交。每个验证通过的里程碑创建本地提交，并记录改动、验证结果和提交号。
-
-本地 `main` 跟踪[公开仓库](https://github.com/bitshowmaker-rgb/InterviewPracticeDesktop)的 `origin/main`，迁移前的本地历史保留在 `local-history-before-github` 分支。远程推送需要明确授权；获得授权并登录有写权限的账号后执行 `git push origin main`。查看历史用 `git show <提交号>`，需要撤销已提交修改时优先用 `git revert <提交号>` 保留历史。
-
-不要提交 API Key、个人设置、模型、运行库、EXE、ZIP、缓存或临时测试产物；这些本机文件继续由现有 `.gitignore` 排除。普通代码更新替换同一 EXE，保留 `MockInterviewAI-data` 和依赖，不累积多个版本的运行包。
 
 ### 语音模型选择
 
