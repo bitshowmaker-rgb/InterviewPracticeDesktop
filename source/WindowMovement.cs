@@ -12,25 +12,49 @@ namespace MockInterviewAI
 {
     public static class WindowMovement
     {
-        public static string LastDragDiagnostic { get; private set; }
+        // The window is a transparent, borderless layered window; the visible card sits
+        // inside these transparent margins (see the root Grid margin in MainWindow.xaml).
+        private const double CardLeft = 26, CardTop = 22, CardRight = 26, CardBottom = 18;
+        private const double EdgeStrip = 9;       // Resizable hot strip just inside the card edge.
+        private const double OuterStrip = 6;      // Resizable strip on the outermost transparent rim.
+
         public static void Attach(Window window)
         {
             window.PreviewMouseLeftButtonDown += delegate(object sender, System.Windows.Input.MouseButtonEventArgs e) {
                 var sourceElement = e.OriginalSource as DependencyObject;
-                LastDragDiagnostic = "MouseDown=" + (sourceElement == null ? "null" : sourceElement.GetType().Name) + "; left=" + e.LeftButton + "; background=" + (sourceElement != null && IsBackground(sourceElement));
                 if (sourceElement == null || !IsBackground(sourceElement)) return;
                 e.Handled = true;
                 if (e.ClickCount == 2)
                     window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
                 else
                 {
-                    try { window.DragMove(); LastDragDiagnostic += "; DragMove returned"; }
-                    catch (InvalidOperationException error) { LastDragDiagnostic += "; " + error.Message; }
+                    try { window.DragMove(); }
+                    catch (InvalidOperationException) { }
                 }
             };
             var source = HwndSource.FromHwnd(new WindowInteropHelper(window).Handle);
             source.AddHook(delegate(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled) {
-                if (message != 0x84) return IntPtr.Zero;
+                if (message == 0x0083) // WM_NCCALCSIZE: keep default handling.
+                    return IntPtr.Zero;
+                if (message == 0x0024) // WM_GETMINMAXINFO: constrain maximized state to the work area.
+                {
+                    IntPtr monitor = MonitorFromWindow(hwnd, 0x00000002 /* MONITOR_DEFAULTTONEAREST */);
+                    var info = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+                    if (GetMonitorInfo(monitor, ref info))
+                    {
+                        MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(lParam, typeof(MINMAXINFO));
+                        mmi.ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left;
+                        mmi.ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top;
+                        mmi.ptMaxSize.x = info.rcWork.right - info.rcWork.left;
+                        mmi.ptMaxSize.y = info.rcWork.bottom - info.rcMonitor.top;
+                        mmi.ptMinTrackSize.x = (int)Math.Ceiling(window.MinWidth);
+                        mmi.ptMinTrackSize.y = (int)Math.Ceiling(window.MinHeight);
+                        Marshal.StructureToPtr(mmi, lParam, true);
+                        handled = true;
+                    }
+                    return IntPtr.Zero;
+                }
+                if (message != 0x0084) return IntPtr.Zero; // WM_NCHITTEST
                 long coordinates = lParam.ToInt64();
                 var screen = new Point((short)(coordinates & 0xffff), (short)((coordinates >> 16) & 0xffff));
                 Point point = window.PointFromScreen(screen);
@@ -41,18 +65,17 @@ namespace MockInterviewAI
             });
         }
 
-        public static bool CanStartDrag(Window window, FrameworkElement element)
-        {
-            Point position = element.TranslatePoint(new Point(element.ActualWidth / 2, element.ActualHeight / 2), window);
-            var hit = window.InputHitTest(position) as DependencyObject;
-            return hit != null && IsBackground(hit);
-        }
-
         private static int ResizeEdge(Window window, Point p)
         {
-            if (window.WindowState != WindowState.Normal || (window.ResizeMode != ResizeMode.CanResize && window.ResizeMode != ResizeMode.CanResizeWithGrip)) return 0;
-            bool left = p.X < 7, right = p.X >= window.ActualWidth - 7;
-            bool top = p.Y < 7, bottom = p.Y >= window.ActualHeight - 7;
+            if (window.WindowState != WindowState.Normal) return 0;
+            double w = window.ActualWidth, h = window.ActualHeight;
+            bool left = (p.X >= CardLeft && p.X < CardLeft + EdgeStrip) || p.X < OuterStrip;
+            bool right = (p.X >= w - CardRight - EdgeStrip && p.X < w - CardRight) || p.X >= w - OuterStrip;
+            bool top = (p.Y >= CardTop && p.Y < CardTop + EdgeStrip) || p.Y < OuterStrip;
+            bool bottom = (p.Y >= h - CardBottom - EdgeStrip && p.Y < h - CardBottom) || p.Y >= h - OuterStrip;
+            // Visible resize grip in the bottom-right corner of the card.
+            if (!bottom && !right && p.X >= w - 52 && p.X <= w - 22 && p.Y >= h - 44 && p.Y <= h - 14)
+                return 17; // HTBOTTOMRIGHT
             if (top) return left ? 13 : right ? 14 : 12;
             if (bottom) return left ? 16 : right ? 17 : 15;
             return left ? 10 : right ? 11 : 0;
@@ -71,13 +94,31 @@ namespace MockInterviewAI
             return true;
         }
 
-        [DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
-        public static int ReadHitTest(Window window, FrameworkElement element)
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT { public int left, top, right, bottom; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int x, y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MONITORINFO
         {
-            Point position = element.PointToScreen(new Point(element.ActualWidth / 2, element.ActualHeight / 2));
-            long coordinates = ((long)(ushort)(short)Math.Round(position.Y) << 16) | (ushort)(short)Math.Round(position.X);
-            return SendMessage(new WindowInteropHelper(window).Handle, 0x84, IntPtr.Zero, new IntPtr(coordinates)).ToInt32();
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
         }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MINMAXINFO
+        {
+            public POINT ptReserved;
+            public POINT ptMaxSize;
+            public POINT ptMaxPosition;
+            public POINT ptMinTrackSize;
+            public POINT ptMaxTrackSize;
+        }
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
     }
 }
