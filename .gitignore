@@ -1,0 +1,17 @@
+# Local credentials and personal settings must never enter Git.
+/MockInterviewAI-data/
+/desktop-test-data/
+*.user
+*.log
+
+# Installed dependencies and build output stay on this computer.
+/models/
+/runtime/
+/lib/
+*.exe
+*.dll
+*.zip
+
+# Generated previews and machine-specific reports.
+/界面预览*.png
+/验证记录*.json
