@@ -24,6 +24,7 @@ public static class StreamingTests
             Run("Cancellation interrupts a silent response body without waiting for another token", Cancel);
             Run("Truncated, malformed and error streams never report a completed answer", InvalidStreams);
             Run("HTTP errors do not expose response bodies", HttpError);
+            Run("Custom provider streams use configured endpoint and model in both answer paths", CustomProvider);
             Console.WriteLine("RESULT " + passed + " streaming tests passed; no real API requests sent.");
             return 0;
         }
@@ -55,6 +56,24 @@ public static class StreamingTests
             End(stream);
             string answer = await pending;
             Check(answer == "第一段。\n\n第二段。" && previews.Count >= 2, "Chinese text or paragraph boundaries corrupted");
+        }
+    }
+    private static async Task CustomProvider()
+    {
+        var api = new ApiConfiguration("https://api.example.com/v1", "custom-model", false, true);
+        foreach (bool automatic in new[] { false, true })
+        {
+            var stream = new FeedStream();
+            stream.Feed(Delta(automatic ? "{\"is_question\":true,\"question\":\"问题\",\"answer\":\"自定义服务答案\"}" : "自定义服务答案", null, null));
+            End(stream);
+            string preview = "";
+            using (var client = new HttpClient(new Handler(stream, api)))
+            {
+                string answer = automatic
+                    ? (await InterviewCore.SendAutomaticStreamingAsync(client, "fake-key", "问题", "", "", text => preview = text, CancellationToken.None, api)).Answer
+                    : await InterviewCore.SendStreamingAnswerAsync(client, "fake-key", "问题", "", "", text => preview = text, CancellationToken.None, api);
+                Check(answer == "自定义服务答案" && preview == answer, "Custom provider lost streaming output");
+            }
         }
     }
     private static async Task Automatic()
@@ -148,12 +167,14 @@ public static class StreamingTests
     private sealed class Handler : HttpMessageHandler
     {
         private readonly FeedStream stream;
-        public Handler(FeedStream stream) { this.stream = stream; }
+        private readonly ApiConfiguration api;
+        public Handler(FeedStream stream, ApiConfiguration api = null) { this.stream = stream; this.api = api ?? ApiConfiguration.Default; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             string body = await request.Content.ReadAsStringAsync();
             var root = InterviewCore.Json().DeserializeObject(body) as Dictionary<string, object>;
-            Check((bool)root["stream"] && (string)root["model"] == InterviewCore.Model, "Streaming request not configured");
+            Check((bool)root["stream"] && (string)root["model"] == api.ModelName && request.RequestUri.AbsoluteUri == api.EndpointUrl, "Streaming request not configured");
+            if (!api.IsDeepSeek) Check(!root.ContainsKey("thinking") && !root.ContainsKey("response_format") && root.ContainsKey("max_completion_tokens"), "Vendor parameters leaked to custom provider");
             Check(request.Headers.Authorization.Parameter == "fake-key" && !body.Contains("fake-key"), "Key leaked into request body");
             return stream == null
                 ? new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("private-server-body") }

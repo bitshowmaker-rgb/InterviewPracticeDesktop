@@ -12,50 +12,50 @@ namespace MockInterviewAI
 {
     public static partial class InterviewCore
     {
-        public static async Task<string> AskStreamingAsync(string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation)
+        public static async Task<string> AskStreamingAsync(string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
-                return await SendStreamingAnswerAsync(client, key, question, jd, resume, progress, cancellation).ConfigureAwait(false);
+                return await SendStreamingAnswerAsync(client, key, question, jd, resume, progress, cancellation, api).ConfigureAwait(false);
         }
 
-        public static async Task<AutomaticAnswer> DetectAndAnswerStreamingAsync(string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation)
+        public static async Task<AutomaticAnswer> DetectAndAnswerStreamingAsync(string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
-                return await SendAutomaticStreamingAsync(client, key, transcript, jd, resume, progress, cancellation).ConfigureAwait(false);
+                return await SendAutomaticStreamingAsync(client, key, transcript, jd, resume, progress, cancellation, api).ConfigureAwait(false);
         }
 
-        internal static async Task<string> SendStreamingAnswerAsync(HttpClient client, string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation)
+        internal static async Task<string> SendStreamingAnswerAsync(HttpClient client, string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
         {
-            string raw = await ReceiveAnswerStream(client, key, BuildRequest(question, jd, resume), delegate(string content) {
+            string raw = await ReceiveAnswerStream(client, key, BuildRequest(question, jd, resume, api), delegate(string content) {
                 if (progress != null) progress(OnlyTwoMinuteAnswer(content));
-            }, cancellation).ConfigureAwait(false);
+            }, cancellation, api).ConfigureAwait(false);
             string answer = OnlyTwoMinuteAnswer(raw);
             if (String.IsNullOrWhiteSpace(answer)) throw new InvalidOperationException("服务没有返回有效的参考答案，请稍后重试。");
             return answer;
         }
 
-        internal static async Task<AutomaticAnswer> SendAutomaticStreamingAsync(HttpClient client, string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation)
+        internal static async Task<AutomaticAnswer> SendAutomaticStreamingAsync(HttpClient client, string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
         {
-            string raw = await ReceiveAnswerStream(client, key, BuildAutomaticRequest(transcript, jd, resume), delegate(string content) {
+            string raw = await ReceiveAnswerStream(client, key, BuildAutomaticRequest(transcript, jd, resume, api), delegate(string content) {
                 string preview;
                 if (progress != null && AutomaticAnswerPreview.TryRead(content, out preview)) progress(OnlyTwoMinuteAnswer(preview));
-            }, cancellation).ConfigureAwait(false);
+            }, cancellation, api).ConfigureAwait(false);
             // The final object still goes through the same strict question/answer validation.
             return ParseAutomaticAnswer(Json().Serialize(new { choices = new[] { new { message = new { content = raw } } } }));
         }
 
-        // DeepSeek Chat Completions SSE: delta.content only, terminated by [DONE].
+        // OpenAI-compatible Chat Completions SSE: delta.content only, terminated by [DONE].
         // https://api-docs.deepseek.com/api/create-chat-completion/
-        private static async Task<string> ReceiveAnswerStream(HttpClient client, string key, string requestBody, Action<string> progress, CancellationToken cancellation)
+        private static async Task<string> ReceiveAnswerStream(HttpClient client, string key, string requestBody, Action<string> progress, CancellationToken cancellation, ApiConfiguration api)
         {
             var body = Json().DeserializeObject(requestBody) as Dictionary<string, object>;
             body["stream"] = true;
             using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
-            using (var request = new HttpRequestMessage(HttpMethod.Post, Endpoint))
+            using (var request = new HttpRequestMessage(HttpMethod.Post, (api ?? ApiConfiguration.Default).EndpointUrl))
             {
                 deadline.CancelAfter(TimeSpan.FromSeconds(75));
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Trim());

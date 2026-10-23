@@ -24,6 +24,43 @@ public static class CoreTests
     {
         try
         {
+            Test("API configuration normalizes base URLs and rejects unsafe or empty settings", delegate {
+                Assert(new ApiConfiguration("https://api.example.com/v1/", " custom-model ", false, true).EndpointUrl == "https://api.example.com/v1/chat/completions", "Base URL not expanded");
+                Assert(new ApiConfiguration("http://localhost:1234/v1", "local-model", false, false).EndpointUrl == "http://localhost:1234/v1/chat/completions", "Local API rejected");
+                foreach (string address in new[] { "", "file:///C:/secret", "http://api.example.com/v1", "https://key@api.example.com/v1", "https://api.example.com/v1?api_key=secret", "https://api.example.com/v1#secret" })
+                    Reject(delegate { new ApiConfiguration(address, "model", false, false); });
+                Reject(delegate { new ApiConfiguration("https://api.example.com", " ", false, false); });
+                ApiConfiguration migrated = ApiConfiguration.FromSettings(new SavedSettings());
+                Assert(migrated.EndpointUrl == InterviewCore.Endpoint && migrated.ModelName == InterviewCore.Model && migrated.JsonMode && !migrated.CompletionTokenLimit, "Existing settings lost default provider");
+            });
+            Test("Custom providers omit vendor extensions and honor token and JSON capabilities", delegate {
+                var api = new ApiConfiguration("https://api.example.com/v1", "custom-model", false, true);
+                foreach (string body in new[] { InterviewCore.BuildRequest("问题", "", "", api), InterviewCore.BuildAutomaticRequest("问题", "", "", api) })
+                {
+                    var root = InterviewCore.Json().DeserializeObject(body) as Dictionary<string, object>;
+                    Assert((string)root["model"] == "custom-model" && !root.ContainsKey("thinking") && !root.ContainsKey("response_format"), "Provider-specific fields leaked");
+                    Assert(root.ContainsKey("max_completion_tokens") && !root.ContainsKey("max_tokens"), "Wrong token limit parameter");
+                }
+                var lookalike = new ApiConfiguration("https://api.deepseek.com.example.com", "model", true, false);
+                Assert(!lookalike.IsDeepSeek, "Host matching leaked DeepSeek extensions");
+            });
+            Test("Manual and automatic HTTP requests use the configured model and endpoint", delegate {
+                var api = new ApiConfiguration("https://api.example.com/v1", "custom-model", false, false);
+                int requests = 0;
+                using (var client = new HttpClient(new FakeHandler { Handle = async (request, cancellation) => {
+                    requests++;
+                    string body = await request.Content.ReadAsStringAsync();
+                    Assert(request.RequestUri.AbsoluteUri == api.EndpointUrl && body.Contains("custom-model") && !body.Contains("private-key"), "Configured provider ignored");
+                    Assert(request.Headers.Authorization.Parameter == "private-key", "Wrong authorization");
+                    string content = requests == 1 ? "成功" : InterviewCore.Json().Serialize(new { is_question = true, question = "问题", answer = "成功" });
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(InterviewCore.Json().Serialize(new { choices = new[] { new { message = new { content = content } } } })) };
+                } }))
+                {
+                    Assert(InterviewCore.SendAsync(client, "private-key", "问题", "", "", CancellationToken.None, api).GetAwaiter().GetResult() == "成功", "Custom manual failed");
+                    Assert(InterviewCore.SendAutomaticAsync(client, "private-key", "问题", "", "", CancellationToken.None, api).GetAwaiter().GetResult().IsQuestion, "Custom automatic failed");
+                }
+                Assert(requests == 2, "Request path missing");
+            });
             Test("Request model, Chinese context and instruction separation", delegate {
                 string body = InterviewCore.BuildRequest("  如何设计控制系统？  ", "研发\n岗位", "A\\B 与 \"项目\"");
                 var root = InterviewCore.Json().DeserializeObject(body) as Dictionary<string, object>;
@@ -180,12 +217,13 @@ public static class CoreTests
             Test("Settings without remembered key never persist a plaintext key", delegate {
                 string folder = Path.Combine(Path.GetFullPath(args[0]), "desktop-core-settings-test");
                 var store = new SettingsStore(folder);
-                store.Save(new SavedSettings { RememberKey = false, JobDescription = "中文岗位", Resume = "真实经历" }, "do-not-store-this-key");
+                store.Save(new SavedSettings { RememberKey = false, JobDescription = "中文岗位", Resume = "真实经历", ApiEndpoint = "https://api.example.com/v1/chat/completions", ApiModel = "custom-model", ApiJsonMode = false, ApiCompletionTokenLimit = true, HideTrayIcon = true }, "do-not-store-this-key");
                 string json = File.ReadAllText(Path.Combine(folder, "settings.json"));
                 Assert(!json.Contains("do-not-store-this-key"), "Plaintext credential persisted");
                 string key, notice;
                 var saved = store.Load(out key, out notice);
                 Assert(key == "" && saved.JobDescription == "中文岗位" && saved.Resume == "真实经历", "Settings roundtrip failed");
+                Assert(saved.ApiModel == "custom-model" && !ApiConfiguration.FromSettings(saved).JsonMode && saved.ApiCompletionTokenLimit && saved.HideTrayIcon == true, "API/tray settings not persisted");
                 store.Save(new SavedSettings { RememberKey = false, JobDescription = "更新岗位", Resume = "" }, "second-key");
                 Assert(store.Load(out key, out notice).JobDescription == "更新岗位", "Atomic replacement failed");
             });

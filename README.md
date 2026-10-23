@@ -4,23 +4,133 @@ Windows 桌面面试练习工具。程序显示名为 Wallpaper Engine，与同�
 
 - 点击开始后识别默认扬声器播放的内容，不采集麦克风。
 - 本地 Whisper GPU 转写，支持中英文混合内容和临时预览。
-- 自动识别问题，通过 DeepSeek 流式生成口语参考答案，上限 700 字。
+- 自动识别问题，通过可配置的 OpenAI 兼容 API 流式生成口语参考答案，上限 700 字。
 - 支持透明度调节、窗口置顶和拖动。
 
-## 开始使用
+## 使用与分享
 
-需要 Windows 64 位和 .NET Framework 4.8。取得完整运行包后，完整解压，运行 `Wallpaper Engine.exe` 或 `启动.cmd`，在设置中填写自己的 DeepSeek API Key，再点击“开始”。不要只复制 EXE。
+### 安装和启动
 
-GitHub 的 Code → Download ZIP 仅提供源码，不包含模型、运行库和 EXE，不能直接运行。完整运行包需要单独取得，具体见[使用与分享指南](docs/usage.md)。
+使用 Windows 64 位电脑，并安装 .NET Framework 4.8。将完整运行包 `InterviewPracticeDesktop-Windows.zip` 解压到一个文件夹，双击 `Wallpaper Engine.exe` 或 `启动.cmd`。
 
-## 文档导航
+必须保留程序旁的 `models`、`runtime` 文件夹和 DLL，不能只把 EXE 复制到桌面。桌面入口应使用快捷方式；在应用根目录执行以下命令可创建它：
 
-- [使用与分享](docs/usage.md)：启动、识别、设置和如何传给别人。
-- [开发与更新](docs/development.md)：依赖准备、测试、构建、Git 工作流和语音模型选择。
-- [性能验证](docs/benchmarks.md)：历史样本对比、测试方法与结果局限。
-- [回答规则来源](answer-templates/来源说明.md)：模板快照和口语化规则的参考依据。
-- [第三方依赖许可](licenses/SOURCES.md)：依赖及其许可证来源。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\source\Create-DesktopShortcut.ps1
+```
 
-## 隐私
+### 识别与回答
 
-语音在本地转写。自动回答会将确认后的转写文字及填写的岗位 JD、简历摘要发送给 DeepSeek。API Key 和个人设置保存在本机 `MockInterviewAI-data`，不纳入 Git，也不包含在干净分享包中。每位使用者自行配置密钥。
+1. 进入“设置”，填写 API 地址、模型 ID 和对应服务商的 API Key 并保存；根据需要补充岗位 JD、简历摘要和术语。
+2. 点击“开始”，持续识别电脑默认扬声器播放的声音，不采集麦克风。启动程序本身不会开始识别；没有播放声音时不会产生转写。
+3. 开启“自动识别问题并回答”后，确认的转写内容会自动用于判断问题和生成答案，无需再次点击生成。
+4. 点击“停止”结束采集；需要重写当前答案时使用“重新生成当前答案”。生成中可以取消。
+
+有兼容 NVIDIA 显卡和完整 GPU 运行库时优先使用 GPU；不可用时会尝试 CPU，速度可能较慢。持续讲话时，GPU 每约 4 秒提供一次临时转写，停顿后用完整语句校正。临时文字不会提前触发回答，CPU 模式跳过额外预览任务以避免积压。
+
+回答使用自然口语，仅提供一个版本，全文上限 700 字（含标点），通常 450～550 字，简单问题可以更短。收到答案内容就逐步显示，不必等待整篇完成；取消或断流后已出现的片段会标记为未完成。若模型超长，程序在上限内优先保留完整句子，没有合适句末时以省略号结束。
+
+### API 配置
+
+支持 OpenAI 兼容的 Chat Completions 接口。设置中可填写 Base URL（程序自动补上 /chat/completions）或完整接口地址、模型 ID 和对应密钥。旧设置自动沿用现有 DeepSeek 地址和模型。切换地址会清空当前密钥；保存后才替换本机设置。
+
+- DeepSeek：地址可填 https://api.deepseek.com，保留现有 deepseek-flash 模型 ID；是否可用以账号权限为准。
+- OpenAI：地址可填 https://api.openai.com/v1，模型 ID 按账号可用的 Chat Completions 模型填写。
+- 其他兼容服务或本机服务：按服务商提供的地址、模型填写。本机服务允许 HTTP，其余地址使用 HTTPS。
+
+服务商不支持 response_format 时取消“自动回答使用 JSON 模式”；模型要求新 token 参数时勾选“使用 max_completion_tokens”。两项默认沿用现有行为。DeepSeek 的 thinking 扩展仅对官方主机发送，其他服务不携带该扩展。自动回答仍要求模型返回提示中指定的 JSON，并由程序校验。
+
+这不包含 Claude Messages、Gemini generateContent 或 OpenAI Responses 原生协议；此类模型需要通过兼容网关提供 Chat Completions。模型须支持文本聊天及 SSE 流式响应，具体参数支持以所选服务商为准。协议依据：[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[流式事件](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)、[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+### 窗口与隐私
+
+拖动标题或空白处移动窗口，右上角滑块调整透明度；默认隐藏托盘图标；按 `Ctrl+Alt+I` 可恢复窗口，在设置中取消“隐藏托盘图标”后可使用托盘菜单。快捷键被占用时会保留托盘入口。右上角 × 可退出程序。共享保护状态可在设置中检查，腾讯会议接收端的实际效果仍应通过另一台设备确认。
+
+设置保存在程序旁的 `MockInterviewAI-data`。语音在本地识别，自动回答会向设置中配置的 API 服务发送确认后的转写文字和你填写的背景资料。请保留自己的设置目录，但不要把它随运行包转发。
+
+### 分享给别人
+
+直接使用者：通过网盘等方式发送整个干净运行包，让对方完整解压，再填写对方自己的 API Key。分享包应包含程序、模型、运行库和第三方许可证，排除发送者的密钥、简历、JD、本地设置、Git 仓库及测试记录。后续转发时继续使用干净分享包，不要将自己使用后的整个目录重新压缩发送。
+
+开发者：发送[源码仓库链接](https://github.com/bitshowmaker-rgb/InterviewPracticeDesktop)。仓库不包含模型、运行库、DLL 和 EXE，Code → Download ZIP 得到的源码不能直接运行，需按下方的开发与更新说明准备依赖并构建。完整运行包可以通过网盘提供，或另行发布为 GitHub Release 附件。
+
+
+## 开发与更新
+
+以下命令均在仓库根目录执行。沿用现有项目位置和 `source/`、`tests/` 目录，不需要迁移应用或本机设置。
+
+### 依赖准备
+
+需要 Windows 64 位和 .NET Framework 4.8。仓库没有打包模型、DLL 或运行库；从新克隆的源码构建时，先按[依赖清单](依赖来源.json)准备文件，并按清单的 SHA-256 校验下载结果。版本、许可和来源见[第三方组件说明](licenses/SOURCES.md)。
+
+| 位置 | 所需内容 |
+| --- | --- |
+| `lib/` | NAudio 2.2.1 的 `NAudio.Core.dll`、`NAudio.Wasapi.dll` |
+| `models/` | `ggml-large-v3-turbo-q5_0.bin` |
+| `runtime/whisper/` | whisper.cpp CPU 发布包及其依赖，包含 `whisper-server.exe` |
+| `runtime/whisper-gpu/` | 可选的 CUDA 发布包及依赖，包含 `whisper-server.exe`；cuBLAS DLL 的补充来源见组件说明 |
+
+已有运行环境的电脑可继续使用现存依赖，无需重新下载。构建脚本将 NAudio DLL 从 `lib/` 复制到程序根目录。
+
+### 测试和构建
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
+```
+
+测试源码保留在 `tests/`，覆盖请求与格式校验、流式回答、取消、语音分段和 700 字上限。测试程序及临时数据写入系统临时目录；默认使用模拟 HTTP、合成 PCM 等测试，不发送真实 API 请求。运行耗时和识别效果的历史记录见[性能验证](docs/benchmarks.md)。
+
+退出正在运行的应用，再构建并启动：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\source\build.ps1
+.\启动.cmd
+```
+
+构建输出仍为根目录的 `Wallpaper Engine.exe`。图标、XAML 和两份模板快照由脚本按现有路径嵌入；不要仅因模板文件是 Markdown 就删除或重命名。资源说明见[许可与规则来源](licenses/SOURCES.md)。
+
+### Git 工作流
+
+修改前确认分支和已有改动，避免覆盖其他工作：
+
+```powershell
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short
+git log --oneline -5
+```
+
+在工作区干净时，用 `git pull --ff-only` 拉取更新，再修改和验证。只有文档变化时检查链接、资源路径和 Git 差异即可；代码行为变化时执行相关测试，构建前退出应用。
+
+```powershell
+git diff --check
+git diff --stat
+git diff
+```
+
+使用具体路径暂存本次修改，不一并暂存无关改动。例如本次只改 README 和文档目录时：
+
+```powershell
+git add -- README.md docs
+git diff --cached --stat
+git diff --cached
+git commit -m "docs: clarify usage and development instructions"
+git status --short
+```
+
+迁移、删除或新增其他文件时，分别检查并暂存对应的具体路径。Git 身份缺失时先由维护者配置自己的身份，再提交。每个验证通过的里程碑创建本地提交，并记录改动、验证结果和提交号。
+
+本地 `main` 跟踪[公开仓库](https://github.com/bitshowmaker-rgb/InterviewPracticeDesktop)的 `origin/main`，迁移前的本地历史保留在 `local-history-before-github` 分支。远程推送需要明确授权；获得授权并登录有写权限的账号后执行 `git push origin main`。查看历史用 `git show <提交号>`，需要撤销已提交修改时优先用 `git revert <提交号>` 保留历史。
+
+不要提交 API Key、个人设置、模型、运行库、EXE、ZIP、缓存或临时测试产物；这些本机文件继续由现有 `.gitignore` 排除。普通代码更新替换同一 EXE，保留 `MockInterviewAI-data` 和依赖，不累积多个版本的运行包。
+
+### 语音模型选择
+
+当前使用 Whisper large-v3-turbo Q5，保留 GPU 加速、完整语句校正和临时预览，兼顾速度与中英文识别准确度。完整 large-v3 与 Turbo 存在速度取舍，不应仅凭模型更大就替换。模型说明参考 [Whisper 官方项目](https://github.com/openai/whisper)。
+
+候选模型需在本机用相同的中英文样本比较错误率、首次文字延迟、最终结果延迟和显存占用，再决定是否切换。本仓库的依赖清单和加载代码仍指向 Turbo Q5，不代表已安装或验证其他权重。
+
+## 其他资料
+
+- [性能验证与局限](docs/benchmarks.md)
+- [第三方许可与回答规则来源](licenses/SOURCES.md)

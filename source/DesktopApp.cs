@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,14 +24,14 @@ namespace MockInterviewAI
         public string LastRecognitionBackend { get; private set; }
         public string LastOutputDevice { get; private set; }
         private readonly SettingsStore store;
-        private readonly TextBox question, answer, job, resume, transcriptBox, vocabulary;
+        private readonly TextBox question, answer, job, resume, transcriptBox, vocabulary, apiEndpoint, apiModel;
         private readonly PasswordBox key;
         private readonly TextBlock status, protectionTitle, protectionDetail, answerContext, speechStatus;
         private readonly TextBlock transcriptPreview;
         private readonly Button generate, start, stop, cancel, settingsButton, copy, pin;
         private readonly Border settingsPanel;
         private readonly Grid interviewPanel;
-        private readonly CheckBox remember, topmost, hideTaskbar;
+        private readonly CheckBox remember, topmost, hideTaskbar, hideTray, apiJsonMode, apiCompletionTokens;
         private readonly CheckBox automatic;
         private readonly Slider opacity;
         private readonly TextBlock opacityLabel;
@@ -38,11 +39,18 @@ namespace MockInterviewAI
         private readonly System.Drawing.Icon trayIcon;
         private readonly AutomaticQuestionBuffer automaticBuffer = new AutomaticQuestionBuffer();
         private readonly DispatcherTimer automaticTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        private Func<string, string, string, string, Action<string>, CancellationToken, Task<AutomaticAnswer>> automaticResponder = InterviewCore.DetectAndAnswerStreamingAsync;
+        private Func<string, string, string, string, Action<string>, CancellationToken, ApiConfiguration, Task<AutomaticAnswer>> automaticResponder = InterviewCore.DetectAndAnswerStreamingAsync;
         private CancellationTokenSource request;
         private SpeakerTranscriptionSession session;
         private string latestTranscript = "";
         private bool closed, busy, stopping, questionEdited, fillingQuestion, automaticRequest, loading = true;
+        private HwndSource hotkeySource;
+        private bool restoreHotkeyRegistered;
+        private const int RestoreHotkeyId = 0x4D49;
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint keyCode);
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr window, int id);
 
         private T Control<T>(string name) where T : class { return Window.FindName(name) as T; }
 
@@ -55,6 +63,8 @@ namespace MockInterviewAI
             job = Control<TextBox>("JobBox"); resume = Control<TextBox>("ResumeBox");
             transcriptBox = Control<TextBox>("TranscriptBox"); vocabulary = Control<TextBox>("VocabularyBox");
             transcriptPreview = Control<TextBlock>("TranscriptPreviewText");
+            apiEndpoint = Control<TextBox>("ApiEndpointBox"); apiModel = Control<TextBox>("ApiModelBox");
+            apiJsonMode = Control<CheckBox>("ApiJsonModeBox"); apiCompletionTokens = Control<CheckBox>("ApiCompletionTokensBox");
             key = Control<PasswordBox>("ApiKeyBox"); status = Control<TextBlock>("StatusText");
             protectionTitle = Control<TextBlock>("ProtectionTitle"); protectionDetail = Control<TextBlock>("ProtectionDetail");
             answerContext = Control<TextBlock>("AnswerContext");
@@ -65,11 +75,15 @@ namespace MockInterviewAI
             settingsPanel = Control<Border>("SettingsPanel"); interviewPanel = Control<Grid>("InterviewPanel");
             remember = Control<CheckBox>("RememberKeyBox"); topmost = Control<CheckBox>("TopmostBox");
             hideTaskbar = Control<CheckBox>("HideTaskbarBox");
+            hideTray = Control<CheckBox>("HideTrayBox");
             automatic = Control<CheckBox>("AutoAnswerBox");
             opacity = Control<Slider>("OpacitySlider"); opacityLabel = Control<TextBlock>("OpacityLabel");
 
             string loadedKey, notice;
             SavedSettings saved = store.Load(out loadedKey, out notice);
+            apiEndpoint.Text = saved.ApiEndpoint ?? InterviewCore.Endpoint;
+            apiModel.Text = saved.ApiModel ?? InterviewCore.Model;
+            apiJsonMode.IsChecked = saved.ApiJsonMode ?? true; apiCompletionTokens.IsChecked = saved.ApiCompletionTokenLimit;
             key.Password = loadedKey;
             job.Text = saved.JobDescription ?? ""; resume.Text = saved.Resume ?? "";
             vocabulary.Text = saved.Vocabulary ?? "技术面试，API，Java，Python，JavaScript，TypeScript，React，Vue，Spring Boot，MySQL，Redis，Docker，Kubernetes，HTTP，TCP，Git，DeepSeek";
@@ -77,6 +91,7 @@ namespace MockInterviewAI
             automatic.IsChecked = saved.AutoAnswerEnabled ?? true;
             opacity.Value = saved.OpacityPercent >= 40 && saved.OpacityPercent <= 100 ? saved.OpacityPercent : 86;
             topmost.IsChecked = saved.AlwaysOnTop; hideTaskbar.IsChecked = saved.HideTaskbar;
+            hideTray.IsChecked = saved.HideTrayIcon ?? true;
             Window.Topmost = saved.AlwaysOnTop; Window.ShowInTaskbar = !saved.HideTaskbar;
             pin.Content = Window.Topmost ? "取消置顶" : "窗口置顶";
             status.Text = String.IsNullOrEmpty(notice) ? "就绪 · 点击开始后，持续识别电脑播放的声音。" : notice;
@@ -89,14 +104,14 @@ namespace MockInterviewAI
                 Window.Icon = decoder.Frames.OrderBy(frame => Math.Abs(frame.PixelWidth - 32)).First();
             }
             Control<Image>("HeaderIcon").Source = Window.Icon;
-            tray = new Forms.NotifyIcon { Text = "Wallpaper Engine", Icon = trayIcon, Visible = true };
+            tray = new Forms.NotifyIcon { Text = "Wallpaper Engine", Icon = trayIcon, Visible = false };
             var menu = new Forms.ContextMenuStrip();
             menu.Items.Add("显示窗口", null, delegate { Window.Dispatcher.BeginInvoke(new Action(Restore)); });
             menu.Items.Add("退出", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { Window.Close(); })); });
             tray.ContextMenuStrip = menu;
             tray.DoubleClick += delegate { Window.Dispatcher.BeginInvoke(new Action(Restore)); };
 
-            Window.SourceInitialized += delegate { WindowMovement.Attach(Window); ApplyAppearance(); ApplyProtection(); };
+            Window.SourceInitialized += delegate { WindowMovement.Attach(Window); RegisterRestoreHotkey(); ApplyAppearance(); ApplyProtection(); };
             Window.ContentRendered += delegate { ApplyProtection(); };
             Window.Closing += delegate { Dispose(); };
             settingsButton.Click += delegate { ToggleSettings(); };
@@ -105,6 +120,7 @@ namespace MockInterviewAI
             pin.Click += delegate { topmost.IsChecked = !(topmost.IsChecked == true); ApplyWindowOptions(); };
             topmost.Click += delegate { ApplyWindowOptions(); };
             hideTaskbar.Click += delegate { ApplyWindowOptions(); };
+            hideTray.Click += delegate { ApplyTrayVisibility(); };
             Control<Button>("MinimizeButton").Click += delegate { Window.WindowState = WindowState.Minimized; };
             Control<Button>("CloseWindowButton").Click += delegate { Window.Close(); };
             opacity.ValueChanged += delegate { ApplyAppearance(); };
@@ -134,10 +150,13 @@ namespace MockInterviewAI
                     Window.Hide();
                 }
             };
+            apiEndpoint.TextChanged += delegate {
+                if (!loading) { key.Clear(); SetStatus("API 地址已改变，请填写对应服务商的 API Key 并保存。", false); }
+            };
             loading = false;
             if (String.IsNullOrWhiteSpace(key.Password))
             {
-                SetStatus("请在设置填写 DeepSeek API Key；开始后将自动识别问题并回答。", false);
+                SetStatus("请在设置填写 API Key；开始后将自动识别问题并回答。", false);
             }
         }
 
@@ -162,6 +181,35 @@ namespace MockInterviewAI
             Window.WindowState = WindowState.Normal;
             Window.Activate();
             ApplyProtection();
+        }
+
+        private void RegisterRestoreHotkey()
+        {
+            hotkeySource = HwndSource.FromHwnd(new WindowInteropHelper(Window).Handle);
+            hotkeySource.AddHook(RestoreHotkeyHook);
+            // MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, I
+            restoreHotkeyRegistered = RegisterHotKey(hotkeySource.Handle, RestoreHotkeyId, 0x4003, 0x49);
+            ApplyTrayVisibility();
+        }
+
+        private IntPtr RestoreHotkeyHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (message == 0x0312 && wParam.ToInt32() == RestoreHotkeyId)
+            {
+                Restore(); handled = true;
+            }
+            return IntPtr.Zero;
+        }
+
+        private void ApplyTrayVisibility()
+        {
+            if (hideTray.IsChecked == true && !restoreHotkeyRegistered)
+            {
+                tray.Visible = true;
+                SetStatus("Ctrl+Alt+I 快捷键被占用，托盘图标暂时保留，以便恢复窗口。", true);
+                return;
+            }
+            tray.Visible = hideTray.IsChecked != true;
         }
 
         public void SetStatus(string message, bool error)
@@ -209,18 +257,27 @@ namespace MockInterviewAI
             settingsButton.Content = show ? "返回" : "设置";
         }
 
+        private ApiConfiguration ReadApiConfiguration()
+        {
+            return new ApiConfiguration(apiEndpoint.Text, apiModel.Text, apiJsonMode.IsChecked == true, apiCompletionTokens.IsChecked == true);
+        }
+
         private void SaveSettings()
         {
             try
             {
+                ApiConfiguration api = ReadApiConfiguration();
                 store.Save(new SavedSettings {
+                    ApiEndpoint = api.EndpointUrl, ApiModel = api.ModelName, ApiJsonMode = api.JsonMode, ApiCompletionTokenLimit = api.CompletionTokenLimit,
                     RememberKey = remember.IsChecked == true,
                     JobDescription = job.Text, Resume = resume.Text, Vocabulary = vocabulary.Text,
                     AlwaysOnTop = topmost.IsChecked == true, HideTaskbar = hideTaskbar.IsChecked == true,
+                    HideTrayIcon = hideTray.IsChecked == true,
                     AutoAnswerEnabled = automatic.IsChecked == true, OpacityPercent = opacity.Value
                 }, key.Password);
                 key.Password = key.Password.Trim();
                 ApplyWindowOptions();
+                ApplyTrayVisibility();
                 settingsPanel.Visibility = Visibility.Collapsed;
                 interviewPanel.Visibility = Visibility.Visible;
                 settingsButton.Content = "设置";
@@ -246,17 +303,17 @@ namespace MockInterviewAI
             if (String.IsNullOrWhiteSpace(question.Text)) { SetStatus("请先输入或说出问题。", true); return; }
             if (String.IsNullOrWhiteSpace(key.Password))
             {
-                ToggleSettings(); SetStatus("请先填写 DeepSeek API Key。", true); return;
+                ToggleSettings(); SetStatus("请先填写 API Key。", true); return;
             }
             var current = new CancellationTokenSource();
             request = current;
             string asked = question.Text.Trim();
             SetBusy(true);
-            SetStatus("DeepSeek 正在生成参考答案…", false);
+            SetStatus("正在生成参考答案…", false);
             try
             {
                 string result = await InterviewCore.AskStreamingAsync(key.Password, asked, job.Text, resume.Text,
-                    text => UpdateAnswerProgress(current, text, false), current.Token);
+                    text => UpdateAnswerProgress(current, text, false), current.Token, ReadApiConfiguration());
                 if (closed || request != current) return;
                 answer.Text = result;
                 answerContext.Text = "本次问题：" + (asked.Length > 60 ? asked.Substring(0, 60) + "…" : asked);
@@ -379,7 +436,7 @@ namespace MockInterviewAI
             if (closed || busy || automatic.IsChecked != true || !automaticBuffer.HasPending) return;
             if (String.IsNullOrWhiteSpace(key.Password))
             {
-                SetStatus("自动回答需要 DeepSeek API Key，请到设置填写并保存。", true);
+                SetStatus("自动回答需要 API Key，请到设置填写并保存。", true);
                 return;
             }
             string text;
@@ -394,7 +451,7 @@ namespace MockInterviewAI
             try
             {
                 AutomaticAnswer result = await automaticResponder(key.Password, text, job.Text, resume.Text,
-                    partial => UpdateAnswerProgress(current, partial, true), current.Token);
+                    partial => UpdateAnswerProgress(current, partial, true), current.Token, ReadApiConfiguration());
                 current.Token.ThrowIfCancellationRequested();
                 if (closed || request != current || automatic.IsChecked != true) return;
                 if (result.IsQuestion)
@@ -486,7 +543,7 @@ namespace MockInterviewAI
             Action<string> lateProgress = null;
             automatic.IsChecked = true;
             automaticBuffer.Clear();
-            automaticResponder = async (secret, text, jd, cv, progress, cancellation) => {
+            automaticResponder = async (secret, text, jd, cv, progress, cancellation, api) => {
                 calls++;
                 if (text.Contains("解释")) progress("依赖注入");
                 await Task.Delay(30, cancellation);
@@ -513,7 +570,7 @@ namespace MockInterviewAI
                 await Task.Delay(1600);
                 await ProcessAutomaticAsync(false);
                 bool noQuestion = calls == 2 && answer.Text == "依赖注入由容器提供依赖。";
-                automaticResponder = async (secret, text, jd, cv, progress, cancellation) => {
+                automaticResponder = async (secret, text, jd, cv, progress, cancellation, api) => {
                     lateProgress = progress;
                     await Task.Delay(10000, cancellation);
                     return new AutomaticAnswer { IsQuestion = true, Question = "stale", Answer = "must not show" };
@@ -564,7 +621,7 @@ namespace MockInterviewAI
             settingsButton.Content = "设置";
             question.Text = "请介绍一下你做过的一个项目，以及你是如何解决其中的困难的。";
             answer.Text = "先给出项目目标与我的职责，再用一个具体问题说明解决过程。\n\n1. 背景：简要说明项目服务的对象，以及需要解决的实际问题。\n\n2. 行动：说明我负责的部分、遇到的困难，以及方案选择的依据。\n\n3. 结果：给出可以核实的结果；没有数据时，明确描述可观察的变化。\n\n4. 复盘：总结经验，以及下次会如何改进。";
-            answerContext.Text = "界面测试示例 · 未调用 DeepSeek";
+            answerContext.Text = "界面测试示例 · 未调用 API";
             copy.IsEnabled = true;
             transcriptBox.Text = "[14:32:08] 请解释一下 Spring Boot 中的 dependency injection，以及 Redis 缓存的使用场景。";
             speechStatus.Text = "未开始 · 只采集默认输出设备，不采集麦克风。";
@@ -585,6 +642,12 @@ namespace MockInterviewAI
         {
             settingsButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             if (settingsPanel.Visibility != Visibility.Visible) return false;
+            key.Password = "old-provider-key";
+            apiEndpoint.Text = "https://api.example.com/v1";
+            if (key.Password.Length != 0) return false;
+            apiModel.Text = "custom-model";
+            apiJsonMode.IsChecked = false;
+            apiCompletionTokens.IsChecked = true;
             key.Password = "ui-test-key-never-persist";
             remember.IsChecked = false;
             opacity.Value = 80;
@@ -597,6 +660,15 @@ namespace MockInterviewAI
             if (content.Contains("ui-test-key-never-persist") || !content.Contains("dependency injection") || WindowAlpha != 204 || !Window.AllowsTransparency || !NativeLayeredWindow) return false;
             SavedSettings persisted = InterviewCore.Json().Deserialize<SavedSettings>(content);
             if (persisted.OpacityPercent != 80 || persisted.AutoAnswerEnabled != true) return false;
+            if (persisted.ApiEndpoint != "https://api.example.com/v1/chat/completions" || persisted.ApiModel != "custom-model" || persisted.ApiJsonMode != false || !persisted.ApiCompletionTokenLimit) return false;
+            if (!restoreHotkeyRegistered || tray.Visible || persisted.HideTrayIcon != true) return false;
+            hideTray.IsChecked = false; ApplyTrayVisibility();
+            if (!tray.Visible) return false;
+            hideTray.IsChecked = true; ApplyTrayVisibility();
+            Window.WindowState = WindowState.Minimized;
+            bool handled = false;
+            RestoreHotkeyHook(new WindowInteropHelper(Window).Handle, 0x0312, new IntPtr(RestoreHotkeyId), IntPtr.Zero, ref handled);
+            if (!handled || !Window.IsVisible || Window.WindowState != WindowState.Normal || tray.Visible) return false;
             pin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             if (!Window.Topmost) return false;
             pin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -608,6 +680,12 @@ namespace MockInterviewAI
         {
             if (closed) return;
             closed = true;
+            if (hotkeySource != null)
+            {
+                if (restoreHotkeyRegistered) UnregisterHotKey(hotkeySource.Handle, RestoreHotkeyId);
+                hotkeySource.RemoveHook(RestoreHotkeyHook);
+            }
+
             automaticTimer.Stop(); automaticBuffer.Clear();
             if (request != null) request.Cancel();
             if (session != null) { session.Dispose(); session = null; }
