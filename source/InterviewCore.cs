@@ -205,13 +205,14 @@ namespace MockInterviewAI
         public static async Task<string> AskVisionAsync(string key, string instruction, byte[] png, CancellationToken cancellation, ApiConfiguration api, string visionModel, string systemPrompt)
         {
             if (png == null || png.Length == 0) throw new InvalidOperationException("截屏内容为空。");
+            api = api ?? ApiConfiguration.Default;
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
             using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(90) })
-            using (var message = new HttpRequestMessage(HttpMethod.Post, (api ?? ApiConfiguration.Default).EndpointUrl))
+            using (var message = new HttpRequestMessage(HttpMethod.Post, api.EndpointUrl))
             {
                 message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Trim());
-                string modelName = String.IsNullOrWhiteSpace(visionModel) ? (api ?? ApiConfiguration.Default).ModelName : visionModel.Trim();
+                string modelName = String.IsNullOrWhiteSpace(visionModel) ? api.ModelName : visionModel.Trim();
                 string system = String.IsNullOrWhiteSpace(systemPrompt) ? DefaultManualSystemPrompt : systemPrompt.Trim();
                 string dataUri = "data:image/png;base64," + Convert.ToBase64String(png);
                 var body = new
@@ -227,7 +228,9 @@ namespace MockInterviewAI
                     stream = false,
                     max_tokens = api.VisionMaxTokens
                 };
-                message.Content = new StringContent(Json().Serialize(body), Encoding.UTF8, "application/json");
+                // Base64 screenshots can exceed the text serializer's two-million-character limit.
+                var visionJson = new JavaScriptSerializer { MaxJsonLength = Int32.MaxValue };
+                message.Content = new StringContent(visionJson.Serialize(body), Encoding.UTF8, "application/json");
                 using (var response = await client.SendAsync(message, cancellation).ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode) throw new InvalidOperationException(HttpError((int)response.StatusCode));
