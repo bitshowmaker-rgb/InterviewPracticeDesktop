@@ -12,25 +12,25 @@ namespace MockInterviewAI
 {
     public static partial class InterviewCore
     {
-        public static async Task<string> AskStreamingAsync(string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
+        public static async Task<string> AskStreamingAsync(string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null, string systemPrompt = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
-                return await SendStreamingAnswerAsync(client, key, question, jd, resume, progress, cancellation, api).ConfigureAwait(false);
+                return await SendStreamingAnswerAsync(client, key, question, jd, resume, progress, cancellation, api, systemPrompt).ConfigureAwait(false);
         }
 
-        public static async Task<AutomaticAnswer> DetectAndAnswerStreamingAsync(string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
+        public static async Task<AutomaticAnswer> DetectAndAnswerStreamingAsync(string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null, string systemPrompt = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             using (var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
-                return await SendAutomaticStreamingAsync(client, key, transcript, jd, resume, progress, cancellation, api).ConfigureAwait(false);
+                return await SendAutomaticStreamingAsync(client, key, transcript, jd, resume, progress, cancellation, api, systemPrompt).ConfigureAwait(false);
         }
 
-        internal static async Task<string> SendStreamingAnswerAsync(HttpClient client, string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
+        internal static async Task<string> SendStreamingAnswerAsync(HttpClient client, string key, string question, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null, string systemPrompt = null)
         {
-            string raw = await ReceiveAnswerStream(client, key, BuildRequest(question, jd, resume, api), delegate(string content) {
+            string raw = await ReceiveAnswerStream(client, key, BuildRequest(question, jd, resume, api, systemPrompt), delegate(string content) {
                 if (progress != null) progress(OnlyTwoMinuteAnswer(content));
             }, cancellation, api).ConfigureAwait(false);
             string answer = OnlyTwoMinuteAnswer(raw);
@@ -38,9 +38,9 @@ namespace MockInterviewAI
             return answer;
         }
 
-        internal static async Task<AutomaticAnswer> SendAutomaticStreamingAsync(HttpClient client, string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null)
+        internal static async Task<AutomaticAnswer> SendAutomaticStreamingAsync(HttpClient client, string key, string transcript, string jd, string resume, Action<string> progress, CancellationToken cancellation, ApiConfiguration api = null, string systemPrompt = null)
         {
-            string raw = await ReceiveAnswerStream(client, key, BuildAutomaticRequest(transcript, jd, resume, api), delegate(string content) {
+            string raw = await ReceiveAnswerStream(client, key, BuildAutomaticRequest(transcript, jd, resume, api, systemPrompt), delegate(string content) {
                 string preview;
                 if (progress != null && AutomaticAnswerPreview.TryRead(content, out preview)) progress(OnlyTwoMinuteAnswer(preview));
             }, cancellation, api).ConfigureAwait(false);

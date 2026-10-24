@@ -72,7 +72,7 @@ namespace MockInterviewAI
                 if (String.IsNullOrWhiteSpace(appRoot))
                     throw new ArgumentException("应用程序目录无效。", "appRoot");
                 string root = Path.GetFullPath(appRoot);
-                string model = Path.Combine(root, "models", "ggml-large-v3-turbo-q5_0.bin");
+                string model = Path.Combine(root, "models", "ggml-large-v3-turbo.bin");
                 string executable = Path.Combine(root, "runtime", runtimeFolder, "whisper-server.exe");
                 if (!File.Exists(model))
                     throw new InvalidOperationException("当前程序目录中找不到语音识别模型：" + model
@@ -84,12 +84,17 @@ namespace MockInterviewAI
 
                 int port = FindAvailablePort();
                 int threads = Math.Max(1, Math.Min(8, Environment.ProcessorCount));
+                // whisper.cpp 原生进程按 ANSI 字节解析命令行，中文用户名路径（如 C:\Users\冯子豪FZH\...）
+                // 会乱码导致找不到模型。工作目录是 <root>\runtime\<folder>，模型固定在 <root>\models\，
+                // 因此传纯相对路径（不含任何非 ASCII 字符），由它自己的工作目录解析。
+                // 语言固定 zh：面试内容为中文，auto 在背景音乐/抖音压缩下常误判成英语。
+                string modelArg = @"..\..\models\ggml-large-v3-turbo.bin";
                 var info = new ProcessStartInfo
                 {
                     FileName = executable,
                     WorkingDirectory = Path.GetDirectoryName(executable),
-                    Arguments = "-m \"" + model + "\" -t " + threads.ToString(CultureInfo.InvariantCulture)
-                        + (useGpu ? "" : " -ng") + " -l auto -sns --host 127.0.0.1 --port " + port.ToString(CultureInfo.InvariantCulture),
+                    Arguments = "-m \"" + modelArg + "\" -t " + threads.ToString(CultureInfo.InvariantCulture)
+                        + (useGpu ? "" : " -ng") + " -l zh -sns --host 127.0.0.1 --port " + port.ToString(CultureInfo.InvariantCulture),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
