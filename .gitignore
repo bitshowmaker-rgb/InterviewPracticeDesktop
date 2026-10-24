@@ -1,5 +1,6 @@
 # Local credentials and personal settings must never enter Git.
 /MockInterviewAI-data/
+/.package-version
 /desktop-test-data/
 /界面预览*.png
 /验证记录*.json
