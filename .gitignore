@@ -1,6 +1,5 @@
 # Local credentials and personal settings must never enter Git.
 /MockInterviewAI-data/
-/desktop-test-data/
 *.user
 *.log
 
@@ -8,10 +7,10 @@
 /models/
 /runtime/
 /lib/
+/_asr_downloads/
 *.exe
 *.dll
 *.zip
 
-# Generated previews and machine-specific reports.
-/界面预览*.png
-/验证记录*.json
+# Startup error dumps.
+/startup-error.txt

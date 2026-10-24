@@ -8,20 +8,10 @@ namespace MockInterviewAI
 {
     public static class AnswerTemplatePolicy
     {
-        public const string SourceRoot = @"C:\Users\56526\Documents\deepseek-harness\default-workspace\skills\interview-answer-templates";
-        private static readonly string Templates = ReadCore(Path.Combine("references", "templates.md"), "AnswerTemplates.md");
+        private static readonly string Templates = ReadEmbedded("AnswerTemplates.md");
 
-        private static string ReadLocal(string relative)
+        private static string ReadEmbedded(string resource)
         {
-            try { return File.ReadAllText(Path.Combine(SourceRoot, relative), Encoding.UTF8); }
-            catch (IOException) { return null; }
-            catch (UnauthorizedAccessException) { return null; }
-        }
-
-        private static string ReadCore(string relative, string resource)
-        {
-            string local = ReadLocal(relative);
-            if (!String.IsNullOrWhiteSpace(local)) return local;
             using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resource))
             {
                 if (stream == null) throw new InvalidOperationException("回答模板缺失，请检查程序文件是否完整。");

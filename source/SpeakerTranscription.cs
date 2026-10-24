@@ -116,6 +116,20 @@ namespace MockInterviewAI
             }
         }
 
+        // Clear all partial state when capture is paused and later resumed, so stale
+        // lead frames from before the pause never attach to a new utterance.
+        public void Reset()
+        {
+            lead.Clear();
+            active.SetLength(0);
+            remainder.Clear();
+            speechFrames = silenceFrames = 0;
+            inSpeech = currentOverlap = false;
+            overlapLeadFrames = 0;
+            nextPreviewBytes = SampleRate * 2 * 4;
+            lastAudio = DateTime.UtcNow;
+        }
+
         public void Finish()
         {
             if (remainder.Count >= 2 && inSpeech)
@@ -194,6 +208,14 @@ namespace MockInterviewAI
             };
         }
 
+        private void BindCapture()
+        {
+            capture.PcmReceived += delegate(byte[] pcm) {
+                lock (gate) { if (capturing && !disposed) segmenter.Add(pcm); }
+            };
+            capture.Failed += Fail;
+        }
+
         public Task StartAsync()
         {
             if (initialization != null) throw new InvalidOperationException("识别已启动。");
@@ -210,14 +232,56 @@ namespace MockInterviewAI
                 abort.Token.ThrowIfCancellationRequested();
                 if (disposed) throw new OperationCanceledException();
                 capture = new LoopbackAudio();
-                capture.PcmReceived += delegate(byte[] pcm) {
-                    lock (gate) { if (capturing && !disposed) segmenter.Add(pcm); }
-                };
-                capture.Failed += Fail;
+                BindCapture();
                 worker = Task.Run((Func<Task>)ProcessQueueAsync);
                 capturing = true;
                 try { capture.Start(); }
                 catch { capturing = false; throw; }
+                idleTimer = new Timer(delegate {
+                    lock (gate) { if (capturing && !disposed) segmenter.Tick(DateTime.UtcNow); }
+                }, null, 100, 100);
+            }
+            Notify(CaptureStatus);
+        }
+
+        // Stop pulling audio from the render endpoint, but keep the whisper server loaded so
+        // Resume() can start again in well under a second instead of reloading 1.5 GB.
+        public void Pause()
+        {
+            LoopbackAudio old;
+            lock (gate)
+            {
+                if (disposed || !capturing) return;
+                capturing = false;
+                segmenter.Reset();
+                if (idleTimer != null) { idleTimer.Dispose(); idleTimer = null; }
+                old = capture;
+                capture = null;
+            }
+            if (old != null) { old.Stop(); old.Dispose(); }
+            Notify("已暂停 · 模型仍在内存，点击继续恢复采集。");
+        }
+
+        public void Resume()
+        {
+            LoopbackAudio fresh;
+            lock (gate)
+            {
+                if (disposed || capturing) throw new InvalidOperationException("当前不在暂停状态。");
+                fresh = new LoopbackAudio();
+                capture = fresh;
+                BindCapture();
+            }
+            try { fresh.Start(); }
+            catch
+            {
+                fresh.Dispose();
+                lock (gate) { if (object.ReferenceEquals(capture, fresh)) capture = null; }
+                throw;
+            }
+            lock (gate)
+            {
+                capturing = true;
                 idleTimer = new Timer(delegate {
                     lock (gate) { if (capturing && !disposed) segmenter.Tick(DateTime.UtcNow); }
                 }, null, 100, 100);
