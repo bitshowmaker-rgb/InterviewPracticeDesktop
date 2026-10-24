@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Wallpaper Engine Launcher")]
-[assembly: AssemblyVersion("5.4.0.0")]
+[assembly: AssemblyVersion("5.5.0.0")]
 internal static class PortableLauncher
 {
     [STAThread]
@@ -48,15 +48,20 @@ internal static class PortableLauncher
         if (File.Exists(marker) && File.ReadAllText(marker) == stamp &&
             File.Exists(Path.Combine(destination, "Wallpaper Engine.exe")) &&
             File.Exists(Path.Combine(destination, "NAudio.Core.dll")) &&
-            File.Exists(Path.Combine(destination, "models", "ggml-large-v3-turbo-q5_0.bin"))) return;
+            File.Exists(Path.Combine(destination, "models", "ggml-large-v3-turbo.bin"))) return;
         using (var file = File.OpenRead(Assembly.GetExecutingAssembly().Location))
         {
             file.Seek(-16, SeekOrigin.End);
             var footer = new BinaryReader(file, Encoding.UTF8, true);
-            if (Encoding.ASCII.GetString(footer.ReadBytes(8)) != "IPDZIP01") throw new InvalidDataException("运行包不完整，请重新下载。");
+            string signature = Encoding.ASCII.GetString(footer.ReadBytes(8));
+            if (signature != "IPDZIP01" && signature != "IPDZIP02") throw new InvalidDataException("运行包不完整，请重新下载。");
             long offset = footer.ReadInt64();
             if (offset < 0 || offset >= file.Length - 16) throw new InvalidDataException("运行包数据无效。");
-            using (var payload = new PayloadStream(file, offset, file.Length - offset - 16))
+            string dataFile = executable + ".data";
+            if (signature == "IPDZIP02" && !File.Exists(dataFile))
+                throw new FileNotFoundException("请把 Release 中的 EXE 和同名 .exe.data 文件都下载到同一个文件夹，再双击 EXE。", dataFile);
+            using (var continuation = signature == "IPDZIP02" ? File.OpenRead(dataFile) : null)
+            using (var payload = new PayloadStream(file, continuation, offset, file.Length - offset - 16))
             using (var archive = new ZipArchive(payload, ZipArchiveMode.Read))
             {
                 string root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -81,7 +86,7 @@ internal static class PortableLauncher
                         }
                     }
                 }
-                if (!File.Exists(Path.Combine(root, "Wallpaper Engine.exe")) || !File.Exists(Path.Combine(root, "models", "ggml-large-v3-turbo-q5_0.bin")))
+                if (!File.Exists(Path.Combine(root, "Wallpaper Engine.exe")) || !File.Exists(Path.Combine(root, "models", "ggml-large-v3-turbo.bin")))
                     throw new InvalidDataException("运行包缺少程序或语音模型。");
                 File.WriteAllText(marker, stamp);
             }
@@ -90,21 +95,35 @@ internal static class PortableLauncher
 
     private sealed class PayloadStream : Stream
     {
-        private readonly Stream source;
-        private readonly long offset, length;
-        public PayloadStream(Stream source, long offset, long length) { this.source = source; this.offset = offset; this.length = length; source.Position = offset; }
+        private readonly Stream source, continuation;
+        private readonly long offset, primaryLength, length;
+        private long position;
+        public PayloadStream(Stream source, Stream continuation, long offset, long primaryLength)
+        {
+            this.source = source; this.continuation = continuation; this.offset = offset;
+            this.primaryLength = primaryLength; length = primaryLength + (continuation == null ? 0 : continuation.Length);
+        }
         public override bool CanRead { get { return true; } }
         public override bool CanSeek { get { return true; } }
         public override bool CanWrite { get { return false; } }
         public override long Length { get { return length; } }
-        public override long Position { get { return source.Position - offset; } set { Seek(value, SeekOrigin.Begin); } }
+        public override long Position { get { return position; } set { Seek(value, SeekOrigin.Begin); } }
         public override long Seek(long value, SeekOrigin origin)
         {
             long next = origin == SeekOrigin.Begin ? value : origin == SeekOrigin.Current ? Position + value : length + value;
             if (next < 0 || next > length) throw new IOException("Invalid archive position");
-            source.Position = offset + next; return next;
+            position = next; return next;
         }
-        public override int Read(byte[] buffer, int start, int count) { return source.Read(buffer, start, (int)Math.Min(count, length - Position)); }
+        public override int Read(byte[] buffer, int start, int count)
+        {
+            if (position >= length) return 0;
+            Stream current = position < primaryLength ? source : continuation;
+            long local = position < primaryLength ? offset + position : position - primaryLength;
+            long available = position < primaryLength ? primaryLength - position : length - position;
+            current.Position = local;
+            int read = current.Read(buffer, start, (int)Math.Min(count, available));
+            position += read; return read;
+        }
         public override void Flush() { }
         public override void SetLength(long value) { throw new NotSupportedException(); }
         public override void Write(byte[] buffer, int start, int count) { throw new NotSupportedException(); }

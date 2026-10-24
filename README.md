@@ -11,6 +11,14 @@ Windows 桌面面试练习工具。程序显示名为 **Wallpaper Engine**，与
 - 窗口可拖动、可任意缩放、可置顶、可调透明度，尺寸自动记忆。
 - 系统提示词可在设置中完全自定义。
 
+## v5.5.0 安装与升级
+
+从 GitHub Releases 下载 `WallpaperEngine-5.5.0-Setup.exe` 和配套的 `WallpaperEngine-5.5.0-Setup.exe.data`，放在同一个文件夹，再双击 EXE。完整包包含 F16 模型和 CPU/CUDA 运行库；由于体积较大，发布时拆为两个附件，不需要手动解压。
+
+首次启动解压到 `%LOCALAPPDATA%\InterviewPracticeDesktop`，之后重复启动会复用已解压文件。升级前关闭旧版；安装器会保留目标目录中的 `MockInterviewAI-data`，发布包不会携带维护者的密钥、简历或设置。默认隐藏任务栏和托盘，按 **Ctrl+Alt+I** 唤回窗口；快捷键被占用时保留托盘入口。
+
+v5.5.0 包含 PR #1 的新增功能，以及大截图触发 `maxJsonLength` 错误的修复。修改转写后请先选中文字，再点“使用选中 / 最新文字”。
+
 ## 目录结构
 
 ```
@@ -92,6 +100,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\source\build.ps1
 ```
 
 输出为根目录的 `Wallpaper Engine.exe`；图标、XAML、两份答题模板会嵌入 exe。
+
+构建完整发布包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-vision-tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\source\Build-PortableLauncher.ps1 -OutputPath C:\path\WallpaperEngine-5.5.0-Setup.exe
+```
+
+构建脚本只包含固定白名单内的程序、F16 模型、运行库和许可证。超过主文件大小阈值时自动生成同名 `.exe.data` 文件；发布时必须上传两份文件。主程序与安装器的版本号均为 5.5.0。
 
 ## 隐私说明
 

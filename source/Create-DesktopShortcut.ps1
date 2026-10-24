@@ -2,7 +2,7 @@ param([string]$ShortcutPath = (Join-Path ([Environment]::GetFolderPath('Desktop'
 $ErrorActionPreference = 'Stop'
 $appRoot = Split-Path -Parent $PSScriptRoot
 $executable = Join-Path $appRoot 'Wallpaper Engine.exe'
-$model = Join-Path $appRoot 'models\ggml-large-v3-turbo-q5_0.bin'
+$model = Join-Path $appRoot 'models\ggml-large-v3-turbo.bin'
 foreach ($required in @($executable, $model)) {
     if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required application file missing: $required" }
 }
